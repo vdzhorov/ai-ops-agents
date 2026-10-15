@@ -1,0 +1,22 @@
+---
+# cve-watch: read-only collection of packages and runtime state.
+# The collector runs via `raw` (plain SSH exec): nothing is copied to or changed on the hosts.
+# The only write is the result file on the controller (delegate_to: localhost).
+- name: cve-watch read-only collection
+  hosts: all
+  gather_facts: false
+  vars:
+    collector_b64: "{{ lookup('ansible.builtin.file', 'collect.sh') | b64encode }}"
+  tasks:
+    - name: Collect packages, listeners, loaded libraries (read-only)
+      ansible.builtin.raw: "echo {{ collector_b64 }} | base64 -d | sh"
+      register: collected
+      changed_when: false
+
+    - name: Store raw output on the controller
+      ansible.builtin.copy:
+        content: "{{ collected.stdout }}"
+        dest: "{{ out_dir }}/{{ inventory_hostname }}.txt"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
