@@ -242,8 +242,10 @@ class OpenAIProvider:
         except openai.AuthenticationError as e:
             raise LLMError("openai: invalid API key") from e
         except openai.RateLimitError as e:
-            code = getattr(e, "code", None) or ((e.body or {}).get("code") if isinstance(e.body, dict) else None)
-            if code == "insufficient_quota":
+            body = e.body if isinstance(e.body, dict) else {}
+            body = body.get("error", body) if isinstance(body.get("error"), dict) else body
+            kinds = {getattr(e, "code", None), getattr(e, "type", None), body.get("code"), body.get("type")}
+            if kinds & {"insufficient_quota", "credit_balance_exhausted"}:
                 raise LLMError("openai: няма кредит/квота в OpenAI акаунта (insufficient_quota) — "
                                "провери Billing на platform.openai.com") from e
             raise LLMError(f"openai: rate limit (HTTP 429): {e.message}") from e

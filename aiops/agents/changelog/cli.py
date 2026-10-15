@@ -241,10 +241,13 @@ def cmd_diff(args, console, web, settings):
     if src.kind == "openstack" and not getattr(src, "project", ""):
         console.print("[yellow]! Release Highlights са съкратени акценти от екипите и често са двусмислени. "
                       "За точни промени по проект: changelog diff <проект> <от> <до> (напр. glance, nova).[/]")
-    if args.raw:
+    def print_raw():
         for r in rng:
             console.rule(f"{r.version} {r.date}")
             console.print(Markdown(r.notes or ""))
+
+    if args.raw:
+        print_raw()
 
     digest = None
     provider = _provider(args.provider, settings, console)
@@ -253,6 +256,11 @@ def cmd_diff(args, console, web, settings):
         with console.status("AI обобщение...") as st:
             digest = summarize(provider, src.name, from_v, to_v, rng, args.lang or settings.lang, max_chars, st.update)
         _print_digest(console, digest)
+    has_digest = digest and (digest.summary or any(digest.items.values()))
+    if not has_digest and not args.raw:
+        # No AI digest (disabled, unavailable or failed): show the notes themselves instead of nothing.
+        console.print("\n[dim]Няма AI обобщение — показвам пълните release notes:[/]")
+        print_raw()
 
     name = re.sub(r"[^a-zA-Z0-9.-]+", "_", f"{src.name}-{from_v}-{to_v}")
     path = _write_report((args.report_dir or settings.report_dir) / f"changelog-{name}-{datetime.now():%Y%m%d-%H%M%S}.md",
