@@ -72,5 +72,20 @@ class QuoteVerificationTest(unittest.TestCase):
         self.assertFalse(d.items["breaking"][1]["verified"])  # invented
 
 
+
+class CommentCleanupTest(unittest.TestCase):
+    def test_comment_only_for_translation_or_unclear(self):
+        from aiops.agents.changelog.summarize import Digest, _clean_text
+        d = Digest()
+        d.items["features"] = [
+            {"version": "1", "quote": "Upgraded Django to 5.2", "text": "Upgraded Django to 5.2", "unclear": False},
+            {"version": "1", "quote": "Upgraded Vue to 3.5", "text": "Vue е обновен до 3.5", "unclear": False},
+            {"version": "2", "quote": "修复 Web 终端 XSS 漏洞", "text": "Поправена XSS уязвимост", "unclear": False},
+            {"version": "3", "quote": "Removed Windows OS support", "text": "Не е ясно за какво", "unclear": True},
+        ]
+        _clean_text(d)
+        self.assertEqual([i["text"] for i in d.items["features"]],
+                         ["", "", "Поправена XSS уязвимост", "Не е ясно за какво"])
+
 if __name__ == "__main__":
     unittest.main()

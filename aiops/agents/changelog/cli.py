@@ -161,9 +161,10 @@ def _print_digest(console, d: Digest):
         if d.items.get(k):
             console.print(f"\n[bold]{title}[/]")
             for i in d.items[k]:
-                console.print(f"  • [cyan]{escape(i.get('version', ''))}[/] {escape(i.get('text', ''))}{_flags(i, True)}")
-                if i.get("quote"):
-                    console.print(f"    [dim]„{escape(i['quote'])}“[/]")
+                main = i.get("quote") or i.get("text", "")
+                console.print(f"  • [cyan]{escape(i.get('version', ''))}[/] {escape(main)}{_flags(i, True)}")
+                if i.get("text") and i.get("quote"):
+                    console.print(f"    [dim]↳ {escape(i['text'])}[/]")
     if d.recommendations:
         console.print("\n[bold]Препоръки[/]")
         for rec in d.recommendations:
@@ -178,15 +179,17 @@ def _write_report(path: Path, src, from_v, to_v, rng, d: Digest | None) -> Path:
            f"- **Генериран:** {datetime.now():%Y-%m-%d %H:%M}", ""]
     if d and (d.summary or any(d.items.values())):
         out += [f"## AI обобщение ({d.by})", "",
-                "_Генерирано от AI. Всяка точка има дословен цитат от източника; пълният текст е по-долу._", "",
+                "_Точките са дословен текст от release notes, подбран и категоризиран от AI; коментар има само при превод "
+                "или неясен източник. Пълният текст е по-долу._", "",
                 f"**Риск:** {d.risk or '?'}", "", d.summary, ""]
         for k, title in CATEGORIES.items():
             if d.items.get(k):
                 out += [f"### {title}", ""]
                 for i in d.items[k]:
-                    out.append(f"- **{i.get('version', '')}** {i.get('text', '')}{_flags(i, False)}")
-                    if i.get("quote"):
-                        out.append(f"  > {i['quote']}")
+                    main = i.get("quote") or i.get("text", "")
+                    out.append(f"- **{i.get('version', '')}** {main}{_flags(i, False)}")
+                    if i.get("text") and i.get("quote"):
+                        out.append(f"  - _{i['text']}_")
                 out.append("")
         if d.recommendations:
             out += ["### Препоръки", ""] + [f"- {x}" for x in d.recommendations] + [""]

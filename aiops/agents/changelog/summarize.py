@@ -55,13 +55,14 @@ Categories:
 
 Rules:
 - Use only what the notes say. Every item names the version it comes from.
-- quote: copy the exact source sentence or fragment the item is based on, verbatim and in its original language
-  (max ~200 characters). Never paraphrase or translate the quote.
-- Do not fill gaps with assumptions. If a note is terse or ambiguous (e.g. "Removed Windows OS support" does not
-  say whether it means running the service on Windows or Windows guests), restate only what is certain, set
-  unclear=true and say in `text` what is ambiguous. Never guess the missing meaning.
-- Merge duplicates (same change mentioned in several versions -> one item, earliest version).
-- Be concise: one sentence per item. Notes may be in any language; write `text` in {lang}."""
+- quote: the item itself — copy the exact source sentence or fragment, verbatim and in its original language
+  (max ~250 characters). Never paraphrase or translate the quote. The reader sees the quote, not a retelling.
+- text: EMPTY STRING in most cases. Fill it only when it adds information the quote lacks:
+  (a) the quote is not in English -> a translation into {lang};
+  (b) the note is terse or ambiguous -> set unclear=true and say what is ambiguous (e.g. "Removed Windows OS
+      support" does not say whether it means running the service on Windows or Windows guests).
+  Never restate or translate an English quote. Never guess missing meaning.
+- Merge duplicates (same change mentioned in several versions -> one item, earliest version)."""
 
 _REDUCE = """You get the extracted change items for the whole range. Write:
 - summary: 3-6 sentences on what this upgrade means in practice
@@ -84,6 +85,20 @@ class Digest:
 def _norm(t: str) -> str:
     t = re.sub(r"[`*_“”\"'’‘]", "", t.lower())
     return re.sub(r"\s+", " ", t).strip()
+
+
+def _clean_text(d: Digest):
+    """Keep the comment only where it adds something: a translation of a non-Latin quote, or the explanation of an
+    unclear item. Small models tend to copy the quote into `text`; that is dropped regardless of the prompt."""
+    for items in d.items.values():
+        for i in items:
+            text, quote = i.get("text", ""), i.get("quote", "")
+            if not text or not quote:
+                continue
+            non_latin = bool(re.search(r"[^\x00-\u024f\s\d\W]", quote))  # CJK, Cyrillic, ...
+            duplicate = _norm(text).rstrip(". ") == _norm(quote).rstrip(". ")
+            if duplicate or not (non_latin or i.get("unclear")):
+                i["text"] = ""
 
 
 def _verify_quotes(d: Digest, rels: list[Release]):
@@ -135,6 +150,7 @@ def summarize(provider, software: str, from_v: str, to_v: str, rels: list[Releas
             d.items[k] = [i for i in out.get(k, []) if isinstance(i, dict)]
         d.summary, d.risk, d.recommendations = out.get("summary", ""), out.get("risk", ""), out.get("recommendations", [])
         _verify_quotes(d, rels)
+        _clean_text(d)
         return d
 
     for i, chunk in enumerate(chunks, 1):
@@ -148,6 +164,7 @@ def summarize(provider, software: str, from_v: str, to_v: str, rels: list[Releas
             d.items[k] += [x for x in out.get(k, []) if isinstance(x, dict)]
 
     _verify_quotes(d, rels)
+    _clean_text(d)
     status(f"{provider.model}: общо обобщение...")
     try:
         out = provider.complete_json(system + "\n\n" + _REDUCE.format(lang=lang_name),
