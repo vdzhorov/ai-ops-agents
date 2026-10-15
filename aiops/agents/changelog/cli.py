@@ -23,6 +23,18 @@ from aiops.core.webcache import FetchError, WebCache
 RISK_STYLE = {"low": "green", "medium": "yellow", "high": "bold red"}
 
 
+def _flags(item: dict, rich: bool) -> str:
+    flags = []
+    if item.get("unclear"):
+        flags.append("неясно в източника — виж пълния текст")
+    if item.get("verified") is False:
+        flags.append("цитатът НЕ е открит в release notes — провери")
+    if not flags:
+        return ""
+    text = " [" + "; ".join(flags) + "]"
+    return f" [yellow]{escape(text)}[/]" if rich else text
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="changelog", description="Versions and changelogs of software.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -149,7 +161,9 @@ def _print_digest(console, d: Digest):
         if d.items.get(k):
             console.print(f"\n[bold]{title}[/]")
             for i in d.items[k]:
-                console.print(f"  • [cyan]{escape(i.get('version', ''))}[/] {escape(i.get('text', ''))}")
+                console.print(f"  • [cyan]{escape(i.get('version', ''))}[/] {escape(i.get('text', ''))}{_flags(i, True)}")
+                if i.get("quote"):
+                    console.print(f"    [dim]„{escape(i['quote'])}“[/]")
     if d.recommendations:
         console.print("\n[bold]Препоръки[/]")
         for rec in d.recommendations:
@@ -163,10 +177,17 @@ def _write_report(path: Path, src, from_v, to_v, rng, d: Digest | None) -> Path:
            f"- **Версии в интервала ({len(rng)}):** {', '.join(r.version for r in rng)}",
            f"- **Генериран:** {datetime.now():%Y-%m-%d %H:%M}", ""]
     if d and (d.summary or any(d.items.values())):
-        out += [f"## AI обобщение ({d.by})", "", f"**Риск:** {d.risk or '?'}", "", d.summary, ""]
+        out += [f"## AI обобщение ({d.by})", "",
+                "_Генерирано от AI. Всяка точка има дословен цитат от източника; пълният текст е по-долу._", "",
+                f"**Риск:** {d.risk or '?'}", "", d.summary, ""]
         for k, title in CATEGORIES.items():
             if d.items.get(k):
-                out += [f"### {title}", ""] + [f"- **{i.get('version', '')}** {i.get('text', '')}" for i in d.items[k]] + [""]
+                out += [f"### {title}", ""]
+                for i in d.items[k]:
+                    out.append(f"- **{i.get('version', '')}** {i.get('text', '')}{_flags(i, False)}")
+                    if i.get("quote"):
+                        out.append(f"  > {i['quote']}")
+                out.append("")
         if d.recommendations:
             out += ["### Препоръки", ""] + [f"- {x}" for x in d.recommendations] + [""]
     out += ["## Пълни release notes (от най-старата към най-новата)", ""]
@@ -204,6 +225,9 @@ def cmd_diff(args, console, web, settings):
     for r in rng:
         t.add_row(escape(r.version), r.date, escape(r.line), f"{len(r.notes or '')} зн.")
     console.print(t)
+    if src.kind == "openstack" and not getattr(src, "project", ""):
+        console.print("[yellow]! Release Highlights са съкратени акценти от екипите и често са двусмислени. "
+                      "За точни промени по проект: changelog diff <проект> <от> <до> (напр. glance, nova).[/]")
     if args.raw:
         for r in rng:
             console.rule(f"{r.version} {r.date}")

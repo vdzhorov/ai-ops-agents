@@ -57,5 +57,20 @@ class HtmlTest(unittest.TestCase):
         self.assertEqual(md, "## 1.0\n\n- Fix `foo`\n- Bar")
 
 
+
+class QuoteVerificationTest(unittest.TestCase):
+    def test_flags_quotes_missing_from_source(self):
+        from aiops.agents.changelog.summarize import Digest, _verify_quotes
+        rels = [Release("2025.1", notes="## Glance\n\n- Removed Windows OS support\n- Added a new store weight mechanism")]
+        d = Digest()
+        d.items["breaking"] = [
+            {"version": "2025.1", "text": "x", "quote": "Removed  windows OS support.", "unclear": True},
+            {"version": "2025.1", "text": "y", "quote": "Windows guest images are no longer supported", "unclear": False},
+        ]
+        _verify_quotes(d, rels)
+        self.assertTrue(d.items["breaking"][0]["verified"])   # whitespace/case/punctuation tolerant
+        self.assertFalse(d.items["breaking"][1]["verified"])  # invented
+
+
 if __name__ == "__main__":
     unittest.main()
