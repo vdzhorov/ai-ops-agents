@@ -5,3 +5,4 @@ httpx>=0.28,<1
 cvss>=3.6,<4
 python-dotenv>=1.2,<2
 rich>=15,<16
+PyYAML>=6,<7

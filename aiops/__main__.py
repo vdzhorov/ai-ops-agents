@@ -6,6 +6,7 @@ import sys
 # tool name -> module exposing main(argv)
 TOOLS = {
     "cve-watch": "aiops.agents.cve_watch.cli",
+    "changelog": "aiops.agents.changelog.cli",
 }
 
 
