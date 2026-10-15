@@ -1,0 +1,52 @@
+@@@SECTION META
+uid=0
+kernel=6.1.0-18-amd64
+arch=x86_64
+@@@SECTION OS_RELEASE
+PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
+NAME="Debian GNU/Linux"
+VERSION_ID="12"
+VERSION="12 (bookworm)"
+ID=debian
+@@@SECTION PKG_DPKG
+ii 	libssl3:amd64	openssl	3.0.11-1~deb12u2	3.0.11-1~deb12u2
+ii 	openssl	openssl	3.0.11-1~deb12u2	3.0.11-1~deb12u2
+ii 	openssh-server	openssh	1:9.2p1-2+deb12u1	1:9.2p1-2+deb12u1
+ii 	openssh-client	openssh	1:9.2p1-2+deb12u1	1:9.2p1-2+deb12u1
+ii 	nginx	nginx	1.22.1-9	1.22.1-9
+ii 	nginx-common	nginx	1.22.1-9	1.22.1-9
+ii 	libc6:amd64	glibc	2.36-9+deb12u3	2.36-9+deb12u3
+ii 	curl	curl	7.88.1-10+deb12u5	7.88.1-10+deb12u5
+ii 	libcurl4:amd64	curl	7.88.1-10+deb12u5	7.88.1-10+deb12u5
+ii 	sudo	sudo	1.9.13p3-1+deb12u1	1.9.13p3-1+deb12u1
+ii 	linux-image-6.1.0-18-amd64	linux-signed-amd64	6.1.76-1	6.1.76+1
+ii 	linux-image-6.1.0-17-amd64	linux-signed-amd64	6.1.69-1	6.1.69+1
+ii 	redis-server	redis	5:7.0.11-1+deb12u1	5:7.0.11-1+deb12u1
+ii 	redis-tools	redis	5:7.0.11-1+deb12u1	5:7.0.11-1+deb12u1
+@@@SECTION LISTEN
+tcp   LISTEN 0      511          0.0.0.0:443        0.0.0.0:*    users:(("nginx",pid=812,fd=7),("nginx",pid=811,fd=7))
+tcp   LISTEN 0      511          0.0.0.0:80         0.0.0.0:*    users:(("nginx",pid=812,fd=6),("nginx",pid=811,fd=6))
+tcp   LISTEN 0      128          10.20.30.40:22     0.0.0.0:*    users:(("sshd",pid=600,fd=3))
+tcp   LISTEN 0      511          127.0.0.1:6379     0.0.0.0:*    users:(("redis-server",pid=700,fd=6))
+@@@SECTION PROC_FILES
+nginx	/usr/sbin/nginx
+nginx	/usr/lib/x86_64-linux-gnu/libssl.so.3
+nginx	/usr/lib/x86_64-linux-gnu/libc.so.6
+sshd	/usr/sbin/sshd
+sshd	/usr/lib/x86_64-linux-gnu/libc.so.6
+redis-server	/usr/bin/redis-check-rdb
+redis-server	/usr/lib/x86_64-linux-gnu/libssl.so.3
+@@@SECTION FILE_OWNERS
+nginx: /usr/sbin/nginx
+libssl3:amd64: /usr/lib/x86_64-linux-gnu/libssl.so.3
+libc6:amd64: /lib/x86_64-linux-gnu/libc.so.6
+openssh-server: /usr/sbin/sshd
+redis-tools: /usr/bin/redis-check-rdb
+@@@SECTION MODULES
+nf_tables
+ext4
+@@@SECTION SERVICES
+nginx.service
+ssh.service
+redis-server.service
+@@@SECTION END
