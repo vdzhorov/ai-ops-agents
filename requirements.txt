@@ -1,5 +1,6 @@
 # Python >= 3.10
 anthropic>=1.14,<2
+openai>=3.31,<4
 ansible-core>=2.21,<2.22
 httpx>=0.28,<1
 cvss>=3.6,<4

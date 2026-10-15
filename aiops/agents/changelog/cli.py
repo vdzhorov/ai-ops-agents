@@ -16,7 +16,7 @@ from aiops.agents.changelog.model import find, latest, select_range, sort_releas
 from aiops.agents.changelog.sources import resolve_source
 from aiops.agents.changelog.summarize import CATEGORIES, Digest, summarize
 from aiops.core.config import load_settings
-from aiops.core.llm import AnthropicProvider, OllamaProvider
+from aiops.core.llm import AnthropicProvider, OllamaProvider, OpenAIProvider
 from aiops.core.masking import Masker
 from aiops.core.webcache import FetchError, WebCache
 
@@ -74,8 +74,9 @@ list the available versions first with:  changelog versions SOFTWARE""",
     d.add_argument("to_version", metavar="TO_VERSION", nargs="?",
                    help="the version you upgrade to (included); default: latest release")
     d.add_argument("--pre", action="store_true", help="include pre-releases in the range")
-    d.add_argument("--provider", choices=["auto", "anthropic", "ollama", "none"], default="auto",
-                   help="AI digest: auto = Claude if ANTHROPIC_API_KEY is set, else local Ollama")
+    d.add_argument("--provider", choices=["auto", "anthropic", "openai", "ollama", "none"], default="auto",
+                   help="AI digest: auto = Claude if ANTHROPIC_API_KEY is set, else OpenAI if OPENAI_API_KEY is set, "
+                        "else local Ollama")
     d.add_argument("--raw", action="store_true", help="also print the full release notes to stdout")
     d.add_argument("--lang", help="language of the AI digest (default AIOPS_LANG or 'bg')")
     d.add_argument("--report-dir", type=Path)
@@ -137,14 +138,23 @@ def cmd_latest(args, console, web):
 def _provider(choice: str, settings, console):
     if choice == "none":
         return None
-    if choice in ("anthropic", "auto") and (os.getenv("ANTHROPIC_API_KEY") or choice == "anthropic"):
-        p = AnthropicProvider(settings.anthropic_model, settings.anthropic_effort, Masker(enabled=False))
-        ok, why = p.available()
-        if ok:
-            return p
-        console.print(f"[yellow]Anthropic: {why}[/]")
-        if choice == "anthropic":
-            return None
+    clouds = {
+        "anthropic": ("ANTHROPIC_API_KEY",
+                      lambda: AnthropicProvider(settings.anthropic_model, settings.anthropic_effort, Masker(enabled=False))),
+        "openai": ("OPENAI_API_KEY",
+                   lambda: OpenAIProvider(settings.openai_model, settings.openai_reasoning_effort, Masker(enabled=False))),
+    }
+    for name, (key_env, make) in clouds.items():
+        if choice == name or (choice == "auto" and os.getenv(key_env)):
+            p = make()
+            ok, why = p.available()
+            if ok:
+                return p
+            console.print(f"[yellow]{name}: {why}[/]")
+            if choice == name:
+                return None
+    if choice not in ("auto", "ollama"):
+        return None
     p = OllamaProvider(settings.ollama_host, settings.ollama_model, num_ctx=16384)
     ok, why = p.available()
     if not ok:
@@ -239,7 +249,7 @@ def cmd_diff(args, console, web, settings):
     digest = None
     provider = _provider(args.provider, settings, console)
     if provider:
-        max_chars = 60000 if provider.name == "anthropic" else 16000
+        max_chars = 16000 if provider.name == "ollama" else 60000
         with console.status("AI обобщение...") as st:
             digest = summarize(provider, src.name, from_v, to_v, rng, args.lang or settings.lang, max_chars, st.update)
         _print_digest(console, digest)

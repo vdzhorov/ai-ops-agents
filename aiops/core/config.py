@@ -15,6 +15,8 @@ load_dotenv(REPO_ROOT / ".env")
 class Settings:
     anthropic_model: str
     anthropic_effort: str
+    openai_model: str
+    openai_reasoning_effort: str
     ollama_host: str
     ollama_model: str
     lang: str
@@ -26,6 +28,8 @@ def load_settings() -> Settings:
     return Settings(
         anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-opus-5-5"),
         anthropic_effort=os.getenv("ANTHROPIC_EFFORT", "low"),
+        openai_model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+        openai_reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "low"),
         ollama_host=os.getenv("OLLAMA_HOST_URL", "http://localhost:11434"),
         ollama_model=os.getenv("OLLAMA_MODEL", "gemma4:e4b"),
         lang=os.getenv("AIOPS_LANG", "bg"),

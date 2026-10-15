@@ -8,7 +8,7 @@ aiops/
   __main__.py              # python -m aiops <tool> ...
   core/
     config.py              # настройки от .env
-    llm.py                 # OllamaProvider + AnthropicProvider (общ интерфейс complete_json)
+    llm.py                 # OllamaProvider, AnthropicProvider, OpenAIProvider (общ интерфейс complete_json)
     masking.py             # маскиране на IP/hostname преди изпращане към Claude
     ansible_runner.py      # пускане на playbook-ове от venv-а
   agents/
@@ -49,9 +49,10 @@ ollama pull gemma4:e4b        # локален модел за triage
    `--max-per-package` (по подразбиране 8) за пакет, подредени по severity, мрежов attack vector, наличен fix и CVSS.
    Останалите се обобщават в отчета. Хостове с еднакъв пакет и еднакъв контекст се оценяват с **една** заявка.
 5. **Оценка** (`--provider`):
-   - `hybrid` (по подразбиране): локалният gemma4:e4b прави triage на всичко безплатно. Claude преоценява само това,
-     което triage не е отхвърлил като `unlikely`/`not_affected`. Има лимит `--claude-budget` (по подразбиране 30 заявки).
-   - `anthropic`: Claude оценява всичко.
+   - `hybrid` (по подразбиране): локалният gemma4:e4b прави triage на всичко безплатно. Облачният модел (Claude, или
+     OpenAI с `--cloud openai`) преоценява само това,
+     което triage не е отхвърлил като `unlikely`/`not_affected`. Има лимит `--cloud-budget` (по подразбиране 30 заявки).
+   - `anthropic` / `openai`: облачният модел оценява всичко.
    - `ollama`: само локален модел, нищо не излиза от машината. По-бавно и по-неточно.
    - `none`: без LLM, само правила (severity + употреба).
 6. **Памет между пусканията.** Оценките се пазят в `.cache/assessments.json`. При следващо пускане моделът вижда само
@@ -86,7 +87,7 @@ Verdict-и: `affected`, `likely`, `possible` (важни) и `unlikely`, `not_af
 .venv/bin/python -m aiops cve-watch -i inv.ini -b --provider ollama
 ```
 
-Полезни флагове: `--scope all`, `--no-kernel`, `--fresh`, `--min-severity medium`, `--include-unknown`, `--max-per-package 15`, `--claude-budget 10`,
+Полезни флагове: `--scope all`, `--no-kernel`, `--fresh`, `--min-severity medium`, `--include-unknown`, `--max-per-package 15`, `--cloud-budget 10`, `--cloud openai`, `--openai-model ...`,
 `--claude-model claude-haiku-5-5`, `--include-inactive-kernels`, `--no-mask`, `--lang en`.
 
 ### Модели и разход
@@ -95,6 +96,9 @@ Verdict-и: `affected`, `likely`, `possible` (важни) и `unlikely`, `not_af
   с общ контекст. Системният prompt е маркиран за prompt caching. Включен е server-side refusal fallback, тъй като
   security съдържанието понякога активира classifier-ите. В края се показва приблизителна цена.
   `ANTHROPIC_MODEL=claude-haiku-5-5` е около 40 пъти по-евтин на токен.
+- **OpenAI** (`OPENAI_MODEL`, по подразбиране `gpt-5-mini`) е алтернатива на Claude: `--provider openai` или в hybrid
+  режим `--cloud openai`. Ползва strict JSON schema, а маскирането работи както при Claude. `OPENAI_BASE_URL` позволява
+  и OpenAI-съвместими endpoint-и.
 - **gemma4:e4b** през Ollama прави triage. На 16 GB MacBook върви с около 5–6 сек. на уязвимост. Ако Ollama runner-ът
   не поддържа structured output (някои MLX builds), JSON schema-та автоматично се подава в prompt-а.
 
@@ -153,7 +157,8 @@ security, бележки за ъпгрейд, deprecations, нови възмо�
 `reports/changelog-*.md` се записват обобщението и **пълните release notes** на всяка версия. С `--raw` пълният текст
 се печата и на екрана.
 
-**AI.** `--provider auto` (по подразбиране) ползва Claude, ако има `ANTHROPIC_API_KEY`, а иначе локалния gemma.
+**AI.** `--provider auto` (по подразбиране) ползва Claude, ако има `ANTHROPIC_API_KEY`, после OpenAI, ако има
+`OPENAI_API_KEY`, а иначе локалния gemma. Може и изрично: `--provider anthropic|openai|ollama`.
 `none` спира AI частта. При голям интервал notes се обработват на части и накрая се прави едно общо обобщение.
 
 **Кеш.** Отговорите се пазят в `.cache/web/`. Списъците с версии се обновяват на няколко часа, а release notes на

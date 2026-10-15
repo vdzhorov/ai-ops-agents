@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 import anthropic
 import httpx
+import openai
 
 from aiops.core.masking import Masker
 
@@ -184,3 +185,82 @@ class AnthropicProvider:
             return json.loads(self.masker.unmask(text))
         except json.JSONDecodeError as e:
             raise LLMError(f"anthropic: invalid JSON: {e}") from e
+
+
+class OpenAIProvider:
+    """OpenAI (or any OpenAI-compatible endpoint via OPENAI_BASE_URL) with strict JSON-schema structured outputs."""
+
+    name = "openai"
+
+    def __init__(self, model: str, reasoning_effort: str, masker: Masker, max_calls: int | None = None):
+        self.model = model
+        self.reasoning_effort = reasoning_effort
+        self.masker = masker
+        self.max_calls = max_calls
+        self.usage = Usage()
+        self._client = None
+        self._reserved = 0
+        self._lock = threading.Lock()
+
+    def available(self) -> tuple[bool, str]:
+        try:
+            self._client = openai.OpenAI()
+        except openai.OpenAIError:
+            return False, "no OpenAI credentials; set OPENAI_API_KEY in .env"
+        return True, ""
+
+    def try_reserve_call(self) -> bool:
+        with self._lock:
+            if self.max_calls is not None and self._reserved >= self.max_calls:
+                return False
+            self._reserved += 1
+            return True
+
+    def estimated_cost(self) -> float | None:
+        return None  # prices vary per model; token counts are reported instead
+
+    def complete_json(self, system: str, user: str, schema: dict) -> dict:
+        if self._client is None:
+            self.available()
+        kwargs = dict(
+            model=self.model,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": self.masker.mask(user)}],
+            response_format={"type": "json_schema", "json_schema": {"name": "result", "schema": schema, "strict": True}},
+            max_completion_tokens=16000,
+        )
+        if self.reasoning_effort:
+            kwargs["reasoning_effort"] = self.reasoning_effort
+        try:
+            try:
+                resp = self._client.chat.completions.create(**kwargs)
+            except openai.BadRequestError as e:
+                if "reasoning_effort" not in str(e):
+                    raise
+                kwargs.pop("reasoning_effort")  # non-reasoning model
+                self.reasoning_effort = ""
+                resp = self._client.chat.completions.create(**kwargs)
+        except openai.AuthenticationError as e:
+            raise LLMError("openai: invalid API key") from e
+        except openai.RateLimitError as e:
+            code = getattr(e, "code", None) or ((e.body or {}).get("code") if isinstance(e.body, dict) else None)
+            if code == "insufficient_quota":
+                raise LLMError("openai: няма кредит/квота в OpenAI акаунта (insufficient_quota) — "
+                               "провери Billing на platform.openai.com") from e
+            raise LLMError(f"openai: rate limit (HTTP 429): {e.message}") from e
+        except openai.APIStatusError as e:
+            raise LLMError(f"openai: HTTP {e.status_code}: {e.message}") from e
+        except openai.APIConnectionError as e:
+            raise LLMError("openai: connection error") from e
+
+        if resp.usage:
+            cached = getattr(resp.usage.prompt_tokens_details, "cached_tokens", 0) or 0
+            self.usage.add(resp.usage.prompt_tokens or 0, resp.usage.completion_tokens or 0, cached)
+        choice = resp.choices[0]
+        if getattr(choice.message, "refusal", None):
+            raise LLMError(f"openai: refusal: {choice.message.refusal}")
+        if choice.finish_reason == "length":
+            raise LLMError("openai: output truncated (max_completion_tokens)")
+        try:
+            return json.loads(self.masker.unmask(choice.message.content or ""))
+        except json.JSONDecodeError as e:
+            raise LLMError(f"openai: invalid JSON: {e}") from e

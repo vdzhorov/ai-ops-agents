@@ -18,7 +18,7 @@ from aiops.agents.cve_watch.severity import LEVELS
 from aiops.agents.cve_watch.state import AssessmentCache
 from aiops.core.ansible_runner import run_playbook, single_host_inventory
 from aiops.core.config import load_settings
-from aiops.core.llm import AnthropicProvider, OllamaProvider
+from aiops.core.llm import AnthropicProvider, OllamaProvider, OpenAIProvider
 from aiops.core.masking import Masker
 
 PLAYBOOK = Path(__file__).parent / "ansible" / "collect.yml"
@@ -41,8 +41,10 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--save-facts", type=Path, help="keep raw collector output in this directory")
 
     an = p.add_argument_group("assessment")
-    an.add_argument("--provider", choices=["hybrid", "anthropic", "ollama", "none"], default="hybrid",
-                    help="hybrid (default): local model triages, Claude decides the rest")
+    an.add_argument("--provider", choices=["hybrid", "anthropic", "openai", "ollama", "none"], default="hybrid",
+                    help="hybrid (default): local model triages, the --cloud model decides the rest")
+    an.add_argument("--cloud", choices=["anthropic", "openai"], default="anthropic",
+                    help="cloud model used by --provider hybrid (default: anthropic)")
     an.add_argument("--min-severity", choices=LEVELS, default="high", help="ignore vulns below this (default: high)")
     an.add_argument("--include-unknown", action="store_true",
                     help="also assess vulns without any severity rating (distro or CVSS)")
@@ -54,10 +56,12 @@ def build_parser() -> argparse.ArgumentParser:
     an.add_argument("--fresh", action="store_true", help="ignore remembered assessments and re-assess everything")
     an.add_argument("--max-per-package", type=int, default=8,
                     help="assess at most N most important vulns per package; the rest are summarized (default: 8)")
-    an.add_argument("--claude-budget", type=int, default=30, help="max Claude requests per run (default: 30)")
+    an.add_argument("--cloud-budget", "--claude-budget", dest="cloud_budget", type=int, default=30,
+                    help="max cloud-model (Claude/OpenAI) requests per run (default: 30)")
     an.add_argument("--claude-model", help="override ANTHROPIC_MODEL")
+    an.add_argument("--openai-model", help="override OPENAI_MODEL")
     an.add_argument("--ollama-model", help="override OLLAMA_MODEL")
-    an.add_argument("--no-mask", action="store_true", help="send IPs/hostnames to Claude unmasked")
+    an.add_argument("--no-mask", action="store_true", help="send IPs/hostnames to the cloud model unmasked")
     an.add_argument("--lang", help="language for explanations (default AIOPS_LANG or 'bg')")
     an.add_argument("--report-dir", type=Path, help="where to write the Markdown report")
     return p
@@ -118,19 +122,24 @@ def main(argv=None) -> int:
 
     masker = Masker(enabled=not args.no_mask)
     masker.add_hostnames(h.host for h in hosts)
-    ollama = claude = None
+    ollama = cloud = None
     if args.provider in ("hybrid", "ollama"):
         ollama = OllamaProvider(settings.ollama_host, args.ollama_model or settings.ollama_model)
         ok, why = ollama.available()
         if not ok:
             console.print(f"[red]Ollama: {why}[/]")
             return 1
-    if args.provider in ("hybrid", "anthropic"):
-        claude = AnthropicProvider(args.claude_model or settings.anthropic_model, settings.anthropic_effort,
-                                   masker, max_calls=args.claude_budget)
-        ok, why = claude.available()
+    cloud_kind = args.cloud if args.provider == "hybrid" else args.provider
+    if cloud_kind == "anthropic":
+        cloud = AnthropicProvider(args.claude_model or settings.anthropic_model, settings.anthropic_effort,
+                                  masker, max_calls=args.cloud_budget)
+    elif cloud_kind == "openai":
+        cloud = OpenAIProvider(args.openai_model or settings.openai_model, settings.openai_reasoning_effort,
+                               masker, max_calls=args.cloud_budget)
+    if cloud:
+        ok, why = cloud.available()
         if not ok:
-            console.print(f"[red]Anthropic: {why}[/]")
+            console.print(f"[red]{cloud.name}: {why}[/]")
             return 1
 
     console.rule("[bold]2/3 Съпоставяне с OSV.dev")
@@ -156,9 +165,10 @@ def main(argv=None) -> int:
         done.append(g)
         print_live(console, g)
 
-    assessor = Assessor(args.provider, lang, ollama, claude, on_done)
-    mode_label = {"hybrid": f"hybrid:{ollama and ollama.model}>{claude and claude.model}",
-                  "anthropic": f"anthropic:{claude and claude.model}",
+    assessor = Assessor(args.provider, lang, ollama, cloud, on_done)
+    cloud_label = f"{cloud.name}:{cloud.model}" if cloud else "-"
+    mode_label = {"hybrid": f"hybrid:{ollama and ollama.model}>{cloud_label}",
+                  "anthropic": cloud_label, "openai": cloud_label,
                   "ollama": f"ollama:{ollama and ollama.model}", "none": "none"}[args.provider]
     cache = AssessmentCache(settings.cache_dir / "assessments.json", mode_label, lang)
     if not args.fresh:
@@ -180,11 +190,12 @@ def main(argv=None) -> int:
     rows = [r for g in done for r in rows_of(g)]
     warnings += assessor.errors
     if assessor.budget_skipped:
-        warnings.append(f"Claude бюджетът (--claude-budget {args.claude_budget}) свърши: "
+        warnings.append(f"Бюджетът за облачния модел (--cloud-budget {args.cloud_budget}) свърши: "
                         f"{assessor.budget_skipped} уязвимости остават с оценката на локалния модел/без оценка")
 
-    mode = {"hybrid": f"hybrid ({ollama.model if ollama else '-'} → {claude.model if claude else '-'})",
-            "anthropic": f"anthropic ({claude.model if claude else '-'})",
+    cloud_desc = f"{cloud.name} ({cloud.model})" if cloud else "-"
+    mode = {"hybrid": f"hybrid ({ollama.model if ollama else '-'} → {cloud_desc})",
+            "anthropic": cloud_desc, "openai": cloud_desc,
             "ollama": f"ollama ({ollama.model if ollama else '-'})", "none": "без LLM (само правила)"}[args.provider]
     summary = {
         "Хостове": ", ".join(h.host for h in hosts),
@@ -196,11 +207,11 @@ def main(argv=None) -> int:
                       f"{stats['after_filter']} над прага, {stats['to_assess']} оценени индивидуално "
                       f"({stats['to_assess'] - assessor.reused} нови)",
     }
-    if claude and claude.usage.calls:
-        cost = claude.estimated_cost()
-        summary["Claude"] = (f"{claude.usage.calls} заявки, {claude.usage.input_tokens} in / "
-                             f"{claude.usage.output_tokens} out токена"
-                             + (f", ~${cost:.3f}" if cost is not None else ""))
+    if cloud and cloud.usage.calls:
+        cost = cloud.estimated_cost()
+        summary[cloud.name] = (f"{cloud.usage.calls} заявки, {cloud.usage.input_tokens} in / "
+                               f"{cloud.usage.output_tokens} out токена"
+                               + (f", ~${cost:.3f}" if cost is not None else ""))
     if ollama and ollama.usage.calls:
         summary["Локален модел"] = f"{ollama.usage.calls} заявки (безплатно)"
 

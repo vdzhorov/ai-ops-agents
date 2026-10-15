@@ -4,7 +4,9 @@ Modes:
   none      - rules only (severity + usage), no LLM
   ollama    - local model gives the final verdict
   anthropic - Claude gives the final verdict for every candidate
-  hybrid    - local model triages everything; Claude re-assesses only what triage did not rule out
+  openai    - OpenAI gives the final verdict for every candidate
+  hybrid    - local model triages everything; the cloud model (Claude or OpenAI) re-assesses only what triage
+              did not rule out
 """
 
 import json
@@ -13,7 +15,7 @@ from typing import Callable
 
 from aiops.agents.cve_watch.findings import VERDICTS, Assessment, Group, Vuln
 from aiops.agents.cve_watch.state import AssessmentCache
-from aiops.core.llm import AnthropicProvider, LLMError, OllamaProvider
+from aiops.core.llm import LLMError, OllamaProvider
 
 LANG_NAMES = {"bg": "Bulgarian (български език, Cyrillic script)", "en": "English"}
 DETAILS_CHARS = 1500
@@ -107,15 +109,15 @@ def _chunks(items, n):
 
 
 class Assessor:
-    def __init__(self, mode: str, lang: str, ollama: OllamaProvider | None, claude: AnthropicProvider | None,
-                 on_group_done: Callable[[Group], None], batch_size: int = 6, claude_workers: int = 4):
+    def __init__(self, mode: str, lang: str, ollama: OllamaProvider | None, cloud,
+                 on_group_done: Callable[[Group], None], batch_size: int = 6, cloud_workers: int = 4):
         self.mode = mode
         self.lang = lang
         self.ollama = ollama
-        self.claude = claude
+        self.cloud = cloud  # AnthropicProvider | OpenAIProvider
         self.on_group_done = on_group_done
         self.batch_size = batch_size
-        self.claude_workers = claude_workers
+        self.cloud_workers = cloud_workers
         self.errors: list[str] = []
         self.budget_skipped = 0
         self.status: Callable[[str], None] = lambda msg: None
@@ -150,15 +152,15 @@ class Assessor:
                 out.setdefault(v.id, Assessment("unassessed", reason="model returned no result for this ID", by=by))
         return out
 
-    def _final_claude(self, g: Group, vulns: list[Vuln], prior: dict[str, Assessment]) -> Group:
+    def _final_cloud(self, g: Group, vulns: list[Vuln], prior: dict[str, Assessment]) -> Group:
         for chunk in _chunks(vulns, self.batch_size):
-            if self.claude.try_reserve_call():
-                g.assessments.update(self._ask(self.claude, g, chunk, True, f"claude ({self.claude.model})"))
+            if self.cloud.try_reserve_call():
+                g.assessments.update(self._ask(self.cloud, g, chunk, True, f"{self.cloud.name} ({self.cloud.model})"))
                 continue
             self.budget_skipped += len(chunk)
             for v in chunk:
                 a = prior.get(v.id) or Assessment("unassessed")
-                a.by = (a.by + ", " if a.by else "") + "Claude budget exhausted"
+                a.by = (a.by + ", " if a.by else "") + "cloud budget exhausted"
                 g.assessments[v.id] = a
         return g
 
@@ -196,25 +198,25 @@ class Assessor:
                 self._done(g, todo)
             return
 
-        with ThreadPoolExecutor(self.claude_workers) as ex:
+        with ThreadPoolExecutor(self.cloud_workers) as ex:
             futures: dict[Future, list[Vuln]] = {}
             for g in groups:
                 todo = todos[id(g)]
                 if not todo:
                     self._done(g, todo)
                     continue
-                if self.mode == "anthropic":
-                    futures[ex.submit(self._final_claude, g, todo, {})] = todo
+                if self.mode in ("anthropic", "openai"):
+                    futures[ex.submit(self._final_cloud, g, todo, {})] = todo
                     continue
-                # hybrid: cheap local triage first; only what it does not rule out goes to Claude.
+                # hybrid: cheap local triage first; only what it does not rule out goes to the cloud model.
                 triage = self._ask(self.ollama, g, todo, False, f"ollama ({self.ollama.model})")
                 g.assessments.update({k: a for k, a in triage.items() if a.verdict in ("unlikely", "not_affected")})
                 escalate = [v for v in todo if v.id not in g.assessments]
                 if not escalate:
                     self._done(g, todo)
                     continue
-                futures[ex.submit(self._final_claude, g, escalate, triage)] = todo
-                # Report whatever Claude finished while the local model was busy.
+                futures[ex.submit(self._final_cloud, g, escalate, triage)] = todo
+                # Report whatever the cloud model finished while the local model was busy.
                 for f in [f for f in futures if f.done()]:
                     self._done(f.result(), futures.pop(f))
             for f in as_completed(list(futures)):
