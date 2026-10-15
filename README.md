@@ -117,6 +117,48 @@ Verdict-и: `affected`, `likely`, `possible` (важни) и `unlikely`, `not_af
 .venv/bin/python -m unittest discover tests
 ```
 
+## changelog
+
+Показва наличните версии на даден софтуер, последните версии и **всички промени между две версии, включително
+тези в междинните версии**. Връща суровите release notes и AI обобщение.
+
+| Софтуер | Как се задава | Източник |
+|---|---|---|
+| JumpServer | `jumpserver` | GitHub releases |
+| Comet Backup | `comet` | docs.cometbackup.com (sitemap + страница за всяка версия) |
+| OpenStack (цял) | `openstack` | серии (2025.1 Epoxy…) от `openstack/releases` + Release Highlights на releases.openstack.org |
+| OpenStack проект | `nova`, `neutron`, … или `openstack:<проект>` | `openstack/releases` (версии) + docs.openstack.org/releasenotes (reno) |
+| Всеки проект с GitHub releases | `github:<owner>/<repo>` | GitHub releases, а при липса на такива tags |
+
+```sh
+.venv/bin/python -m aiops changelog versions jumpserver            # последните 10 версии (без AI)
+.venv/bin/python -m aiops changelog versions jumpserver --all      # всички версии
+.venv/bin/python -m aiops changelog versions comet --line voyager -n 20
+.venv/bin/python -m aiops changelog versions openstack             # серии на OpenStack (2026.2, 2026.1, ...)
+.venv/bin/python -m aiops changelog diff openstack 2024.1 2025.2    # highlights на всички серии между тях
+.venv/bin/python -m aiops changelog latest nova                    # последна версия общо и по линия/серия
+.venv/bin/python -m aiops changelog diff jumpserver v4.10.15 v5.0.0
+.venv/bin/python -m aiops changelog diff comet 26.8.5               # до последната версия
+.venv/bin/python -m aiops changelog diff nova caracal epoxy         # OpenStack: серия = последната ѝ версия
+.venv/bin/python -m aiops changelog diff nova 29.4.0 31.3.1 --raw --provider none
+```
+
+**Интервал.** `diff A B` включва всяка публикувана версия, за която `A < версия ≤ B`, подредени по номер. Така при
+паралелни линии влизат и поддръжните версии, които попадат между двете. Например между `v4.10.15` и `v5.0.0` влизат
+`v4.10.16…v4.10.19`, но не `v3.10.x`. Pre-release версиите (rc, beta) се включват с `--pre`. При OpenStack подредбата е
+първо по серия, защото преди 2015 г. версиите се номерираха по година.
+
+**Изход.** На екрана се показват списък с версиите в интервала и AI обобщение по категории: breaking changes,
+security, бележки за ъпгрейд, deprecations, нови възможности, важни поправки, плюс риск и препоръки. В
+`reports/changelog-*.md` се записват обобщението и **пълните release notes** на всяка версия. С `--raw` пълният текст
+се печата и на екрана.
+
+**AI.** `--provider auto` (по подразбиране) ползва Claude, ако има `ANTHROPIC_API_KEY`, а иначе локалния gemma.
+`none` спира AI частта. При голям интервал notes се обработват на части и накрая се прави едно общо обобщение.
+
+**Кеш.** Отговорите се пазят в `.cache/web/`. Списъците с версии се обновяват на няколко часа, а release notes на
+отделните версии се пазят по-дълго. Без `GITHUB_TOKEN` GitHub позволява 60 заявки на час.
+
 ## Нов инструмент
 
 1. `aiops/agents/<name>/cli.py` с `main(argv) -> int`
